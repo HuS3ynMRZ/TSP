@@ -1,322 +1,257 @@
-"""
-TSP Solver: Classical vs Quantum Approaches
-Compares different algorithms for solving the Traveling Salesman Problem
-"""
+import numpy as np
+import matplotlib.pyplot as plt
+from itertools import permutations
+
+# city generator
+np.random.seed(42) # <------------------------- Lock the randomness here
+n_cities = 4
+coords = np.random.randint(0, 100, size=(n_cities, 2))
+
+# distance matrix
+distance_matrix = np.array([
+    [np.linalg.norm(coords[i] - coords[j]) for j in range(n_cities)]
+    for i in range(n_cities)
+])
+
+print("Coordinates:")
+for i, (x, y) in enumerate(coords):
+    print(f"  City {i}: ({x}, {y})")
+
+print("\nDistance Matrix:")
+print(np.round(distance_matrix, 2))
+
+# brute force solve
+def total_distance(route, dist_matrix):
+    total = 0
+    for i in range(len(route) - 1):
+        total += dist_matrix[route[i]][route[i+1]]
+    total += dist_matrix[route[-1]][route[0]]  # return to start
+    return total
+
+cities = list(range(1, n_cities))  # fix city 0 as start
+best_route = None
+best_dist = float('inf')
+
+for perm in permutations(cities):
+    route = [0] + list(perm)
+    dist = total_distance(route, distance_matrix)
+    if dist < best_dist:
+        best_dist = dist
+        best_route = route
+
+full_route = best_route + [0]
+print(f"\nBest route: {full_route}")
+print(f"Total distance: {best_dist:.2f}")
+
+# plot for all connections
+fig, axes = plt.subplots(1, 2, figsize=(14, 6))
+
+ax1 = axes[0]
+ax1.scatter(coords[:, 0], coords[:, 1], s=200, c='red', zorder=3)
+for i, (x, y) in enumerate(coords):
+    ax1.annotate(f'City {i}', (x, y), textcoords="offset points", xytext=(10, 5), fontsize=10)
+
+for i in range(n_cities):
+    for j in range(i+1, n_cities):
+        x_vals = [coords[i][0], coords[j][0]]
+        y_vals = [coords[i][1], coords[j][1]]
+        ax1.plot(x_vals, y_vals, 'b-', alpha=0.3)
+        mid_x = (coords[i][0] + coords[j][0]) / 2
+        mid_y = (coords[i][1] + coords[j][1]) / 2
+        dist = np.linalg.norm(coords[i] - coords[j])
+        ax1.annotate(f'{dist:.1f}', (mid_x, mid_y), fontsize=7, color='gray')
+
+ax1.set_title('All Connections')
+ax1.grid(True)
+
+# plot for winner
+ax2 = axes[1]
+ax2.scatter(coords[:, 0], coords[:, 1], s=200, c='red', zorder=3)
+for i, (x, y) in enumerate(coords):
+    ax2.annotate(f'City {i}', (x, y), textcoords="offset points", xytext=(10, 5), fontsize=10)
+
+for i in range(len(full_route) - 1):
+    a, b = full_route[i], full_route[i+1]
+    ax2.plot([coords[a][0], coords[b][0]], [coords[a][1], coords[b][1]], 'g-', linewidth=2.5)
+    mid_x = (coords[a][0] + coords[b][0]) / 2
+    mid_y = (coords[a][1] + coords[b][1]) / 2
+    dist = distance_matrix[a][b]
+    ax2.annotate(f'{dist:.1f}', (mid_x, mid_y), fontsize=7, color='darkgreen')
+
+# add arrows for direction
+for i in range(len(full_route) - 1):
+    a, b = full_route[i], full_route[i+1]
+    ax2.annotate('', xy=coords[b], xytext=coords[a],
+                arrowprops=dict(arrowstyle='->', color='green', lw=2))
+
+ax2.set_title(f'Best Route — Distance: {best_dist:.2f}')
+ax2.grid(True)
+
+plt.suptitle('TSP — 5 Cities (Brute Force)', fontsize=14, fontweight='bold')
+plt.tight_layout()
+plt.show()
+
+# ── QUANTUM TSP WITH GROVER'S ALGORITHM (4 CITIES) ───────────────────
 
 import numpy as np
-import time
-from itertools import permutations
-from typing import List, Tuple
 import matplotlib.pyplot as plt
+from itertools import permutations
+from qiskit import QuantumCircuit, QuantumRegister, ClassicalRegister
+from qiskit_aer import AerSimulator
 
-# Quantum computing libraries (install: pip install qiskit qiskit-aer)
-try:
-    from qiskit import QuantumCircuit
-    from qiskit_aer import AerSimulator
-    from qiskit.primitives import Sampler
-    QISKIT_AVAILABLE = True
-except ImportError:
-    QISKIT_AVAILABLE = False
-    print("Qiskit not installed. Install with: pip install qiskit qiskit-aer")
+# ── 1. ENUMERATE ALL ROUTES ───────────────────────────────────────────
+# Fix city 0 as start, permute the rest
+all_routes = [[0] + list(p) for p in permutations(range(1, n_cities))]
 
+def route_distance(route):
+    return sum(distance_matrix[route[t]][route[(t+1) % len(route)]] for t in range(len(route)))
 
-class TSPSolver:
-    def __init__(self, distance_matrix: np.ndarray):
-        self.distance_matrix = distance_matrix
-        self.n_cities = len(distance_matrix)
-        
-    def calculate_route_distance(self, route: List[int]) -> float:
-        """Calculate total distance of a route"""
-        total = 0
-        for i in range(len(route)):
-            total += self.distance_matrix[route[i-1], route[i]]
-        return total
-    
-    # ==================== CLASSICAL METHODS ====================
-    
-    def brute_force(self) -> Tuple[List[int], float, float]:
-        """Exhaustive search - O(n!)"""
-        start_time = time.time()
-        
-        cities = list(range(self.n_cities))
-        best_route = None
-        best_distance = float('inf')
-        
-        for perm in permutations(cities[1:]):  # Fix first city
-            route = [0] + list(perm)
-            distance = self.calculate_route_distance(route)
-            if distance < best_distance:
-                best_distance = distance
-                best_route = route
-                
-        elapsed = time.time() - start_time
-        return best_route, best_distance, elapsed
-    
-    def nearest_neighbor(self, start_city: int = 0) -> Tuple[List[int], float, float]:
-        """Greedy nearest neighbor heuristic - O(n²)"""
-        start_time = time.time()
-        
-        unvisited = set(range(self.n_cities))
-        route = [start_city]
-        unvisited.remove(start_city)
-        
-        current = start_city
-        while unvisited:
-            nearest = min(unvisited, 
-                         key=lambda city: self.distance_matrix[current, city])
-            route.append(nearest)
-            unvisited.remove(nearest)
-            current = nearest
-            
-        distance = self.calculate_route_distance(route)
-        elapsed = time.time() - start_time
-        return route, distance, elapsed
-    
-    def two_opt(self, initial_route: List[int] = None, 
-                max_iterations: int = 1000) -> Tuple[List[int], float, float]:
-        """2-opt local search improvement"""
-        start_time = time.time()
-        
-        if initial_route is None:
-            route, _, _ = self.nearest_neighbor()
-        else:
-            route = initial_route.copy()
-            
-        best_distance = self.calculate_route_distance(route)
-        improved = True
-        iterations = 0
-        
-        while improved and iterations < max_iterations:
-            improved = False
-            iterations += 1
-            
-            for i in range(1, self.n_cities - 1):
-                for j in range(i + 1, self.n_cities):
-                    # Try reversing route[i:j+1]
-                    new_route = route[:i] + route[i:j+1][::-1] + route[j+1:]
-                    new_distance = self.calculate_route_distance(new_route)
-                    
-                    if new_distance < best_distance:
-                        route = new_route
-                        best_distance = new_distance
-                        improved = True
-                        
-        elapsed = time.time() - start_time
-        return route, best_distance, elapsed
-    
-    def held_karp(self) -> Tuple[List[int], float, float]:
-        """Dynamic Programming solution - O(n² * 2^n)"""
-        start_time = time.time()
-        
-        n = self.n_cities
-        # dp[mask][i] = min cost to visit cities in mask, ending at i
-        dp = {}
-        parent = {}
-        
-        # Base case: start from city 0, visit only city 0
-        dp[(1, 0)] = 0
-        
-        # Fill DP table
-        for mask in range(1, 1 << n):
-            for last in range(n):
-                if not (mask & (1 << last)):
-                    continue
-                    
-                prev_mask = mask ^ (1 << last)
-                
-                if prev_mask == 0:
-                    continue
-                    
-                for prev in range(n):
-                    if not (prev_mask & (1 << prev)):
-                        continue
-                        
-                    if (prev_mask, prev) not in dp:
-                        continue
-                        
-                    cost = dp[(prev_mask, prev)] + self.distance_matrix[prev, last]
-                    
-                    if (mask, last) not in dp or cost < dp[(mask, last)]:
-                        dp[(mask, last)] = cost
-                        parent[(mask, last)] = prev
-        
-        # Find minimum cost to visit all cities and return to start
-        full_mask = (1 << n) - 1
-        best_distance = float('inf')
-        best_last = -1
-        
-        for last in range(1, n):
-            if (full_mask, last) in dp:
-                cost = dp[(full_mask, last)] + self.distance_matrix[last, 0]
-                if cost < best_distance:
-                    best_distance = cost
-                    best_last = last
-        
-        # Reconstruct path
-        route = []
-        mask = full_mask
-        current = best_last
-        
-        while mask:
-            route.append(current)
-            if (mask, current) not in parent:
-                break
-            next_current = parent[(mask, current)]
-            mask ^= (1 << current)
-            current = next_current
-            
-        route.reverse()
-        route = [0] + route  # Add start city
-        
-        elapsed = time.time() - start_time
-        return route, best_distance, elapsed
-    
-    # ==================== QUANTUM METHODS ====================
-    
-    def qaoa_tsp(self, p: int = 1) -> Tuple[List[int], float, float]:
-        """
-        QAOA (Quantum Approximate Optimization Algorithm) for TSP
-        This is a simplified version for demonstration
-        """
-        if not QISKIT_AVAILABLE:
-            return None, float('inf'), 0.0
-            
-        start_time = time.time()
-        
-        # For small problems, encode as binary optimization
-        # This is a simplified QAOA demonstration
-        n = self.n_cities
-        
-        # Create quantum circuit
-        n_qubits = n * n  # Position encoding: qubit[i*n + j] = 1 if city j is at position i
-        qc = QuantumCircuit(n_qubits, n_qubits)
-        
-        # Initialize superposition
-        qc.h(range(n_qubits))
-        
-        # Apply QAOA layers (simplified)
-        beta = np.pi / 4
-        gamma = np.pi / 4
-        
-        for _ in range(p):
-            # Cost Hamiltonian (distance minimization)
-            for i in range(n - 1):
-                for j in range(n):
-                    for k in range(n):
-                        if j != k:
-                            # Entangle adjacent positions
-                            qc.rzz(gamma * self.distance_matrix[j, k], 
-                                  i * n + j, (i + 1) * n + k)
-            
-            # Mixer Hamiltonian
-            qc.rx(2 * beta, range(n_qubits))
-        
-        # Measure
-        qc.measure(range(n_qubits), range(n_qubits))
-        
-        # Simulate
-        simulator = AerSimulator()
-        job = simulator.run(qc, shots=1000)
-        result = job.result()
-        counts = result.get_counts()
-        
-        # Parse best result (simplified - just take most common)
-        best_bitstring = max(counts, key=counts.get)
-        
-        # Decode to route (simplified decoding)
-        route = self._decode_bitstring_to_route(best_bitstring)
-        distance = self.calculate_route_distance(route)
-        
-        elapsed = time.time() - start_time
-        return route, distance, elapsed
-    
-    def _decode_bitstring_to_route(self, bitstring: str) -> List[int]:
-        """Decode quantum measurement to valid TSP route (simplified)"""
-        # This is a placeholder - real decoding is complex
-        # For demo, just return a valid greedy route
-        return self.nearest_neighbor()[0]
+# Map each route to a binary index
+route_distances = [(i, route, route_distance(route)) for i, route in enumerate(all_routes)]
+route_distances.sort(key=lambda x: x[2])
 
+print("All possible routes:")
+for i, route, dist in route_distances:
+    print(f"  |{format(i, '03b')}⟩ Route {i}: {route + [route[0]]} — distance: {dist:.2f}")
 
-def generate_random_cities(n: int, seed: int = 42) -> np.ndarray:
-    """Generate random city coordinates and distance matrix"""
-    np.random.seed(seed)
-    coords = np.random.rand(n, 2) * 100
-    
-    # Calculate Euclidean distance matrix
-    distance_matrix = np.zeros((n, n))
-    for i in range(n):
-        for j in range(n):
-            if i != j:
-                distance_matrix[i, j] = np.linalg.norm(coords[i] - coords[j])
-                
-    return distance_matrix
+# The shortest route is our target
+target_idx = route_distances[0][0]
+target_route = route_distances[0][1]
+target_dist = route_distances[0][2]
+target_state = format(target_idx, '03b')
 
+print(f"\nTarget state: |{target_state}⟩ — Grover's should find this")
 
-def benchmark_algorithms(n_cities: int = 8):
-    """Compare all algorithms"""
-    print(f"\n{'='*60}")
-    print(f"TSP Benchmark: {n_cities} cities")
-    print(f"{'='*60}\n")
-    
-    distance_matrix = generate_random_cities(n_cities)
-    solver = TSPSolver(distance_matrix)
-    
-    results = {}
-    
-    # Classical methods
-    methods = [
-        ("Nearest Neighbor", solver.nearest_neighbor, n_cities <= 100),
-        ("2-Opt", solver.two_opt, n_cities <= 50),
-        ("Brute Force", solver.brute_force, n_cities <= 10),
-        ("Held-Karp (DP)", solver.held_karp, n_cities <= 20),
-    ]
-    
-    for name, method, should_run in methods:
-        if should_run:
-            try:
-                route, distance, elapsed = method()
-                results[name] = {
-                    'route': route,
-                    'distance': distance,
-                    'time': elapsed
-                }
-                print(f"{name:20s}: Distance = {distance:8.2f}, Time = {elapsed:8.4f}s")
-            except Exception as e:
-                print(f"{name:20s}: Error - {e}")
-        else:
-            print(f"{name:20s}: Skipped (too slow for {n_cities} cities)")
-    
-    # Quantum method (if available)
-    if QISKIT_AVAILABLE and n_cities <= 5:
-        try:
-            route, distance, elapsed = solver.qaoa_tsp()
-            if route:
-                results["QAOA (Quantum)"] = {
-                    'route': route,
-                    'distance': distance,
-                    'time': elapsed
-                }
-                print(f"{'QAOA (Quantum)':20s}: Distance = {distance:8.2f}, Time = {elapsed:8.4f}s")
-        except Exception as e:
-            print(f"{'QAOA (Quantum)':20s}: Error - {e}")
-    
-    # Find best solution
-    if results:
-        best = min(results.items(), key=lambda x: x[1]['distance'])
-        print(f"\nBest solution: {best[0]} with distance {best[1]['distance']:.2f}")
-    
-    return results
+# ── 2. BUILD GROVER'S CIRCUIT ─────────────────────────────────────────
+n_qubits = 3
+qr = QuantumRegister(n_qubits, 'q')
+cr = ClassicalRegister(n_qubits, 'c')
+circuit = QuantumCircuit(qr, cr)
 
+# Step 1: Hadamard on all qubits — superposition of all 8 states
+circuit.h(qr)
+circuit.barrier()
 
-if __name__ == "__main__":
-    # Test with different problem sizes
-    for n in [6, 8, 10]:
-        benchmark_algorithms(n)
-    
-    print("\n" + "="*60)
-    print("Notes:")
-    print("- Quantum simulation is exponentially slow on classical hardware")
-    print("- Real quantum speedup requires actual quantum computers")
-    print("- QAOA results are approximate, not guaranteed optimal")
-    print("- For fair comparison, focus on solution quality, not speed")
-    print("="*60)
+# Step 2: Oracle — phase-flip the target state
+# Flip qubits where target bit is 0, apply multi-controlled Z, flip back
+for i, bit in enumerate(reversed(target_state)):
+    if bit == '0':
+        circuit.x(qr[i])
+circuit.h(qr[2])
+circuit.ccx(qr[0], qr[1], qr[2])  # Toffoli gate = controlled-controlled-X
+circuit.h(qr[2])
+for i, bit in enumerate(reversed(target_state)):
+    if bit == '0':
+        circuit.x(qr[i])
+circuit.barrier()
+
+# Step 3: Diffusion operator
+circuit.h(qr)
+circuit.x(qr)
+circuit.h(qr[2])
+circuit.ccx(qr[0], qr[1], qr[2])
+circuit.h(qr[2])
+circuit.x(qr)
+circuit.h(qr)
+circuit.barrier()
+
+# Step 4: Measure
+circuit.measure(qr, cr)
+
+print("\nGrover's Circuit:")
+print(circuit.draw(output='text'))
+
+# ── 3. RUN ON SIMULATOR ───────────────────────────────────────────────
+simulator = AerSimulator()
+job = simulator.run(circuit, shots=1000)
+result = job.result()
+counts = result.get_counts()
+
+print(f"\nMeasurement results (1000 shots):")
+for state, count in sorted(counts.items(), key=lambda x: -x[1]):
+    idx = int(state, 2)
+    if idx < len(all_routes):
+        route = all_routes[idx]
+        print(f"  |{state}⟩ Route {idx} {route + [route[0]]}: {count} times ({count/10:.1f}%)")
+    else:
+        print(f"  |{state}⟩ unused state: {count} times ({count/10:.1f}%)")
+
+# ── 4. DECODE RESULT ──────────────────────────────────────────────────
+# Filter out unused states (indices >= n_routes)
+valid_counts = {k: v for k, v in counts.items() if int(k, 2) < len(all_routes)}
+measured = max(valid_counts, key=valid_counts.get)
+measured_idx = int(measured, 2)
+quantum_route = all_routes[measured_idx]
+q_dist = route_distance(quantum_route)
+
+print(f"\nGrover's found route: {quantum_route + [quantum_route[0]]}")
+print(f"Quantum distance:   {q_dist:.2f}")
+print(f"Classical distance: {best_dist:.2f}")
+
+if abs(q_dist - best_dist) < 0.01:
+    print("✓ Grover's matched the optimal solution!")
+else:
+    print("✗ Grover's found a suboptimal solution")
+
+# ── 5. PLOT RESULTS ───────────────────────────────────────────────────
+fig, axes = plt.subplots(1, 3, figsize=(18, 6))
+
+# Left — all connections
+ax1 = axes[0]
+ax1.scatter(coords[:, 0], coords[:, 1], s=200, c='red', zorder=3)
+for i, (cx, cy) in enumerate(coords):
+    ax1.annotate(f'City {i}', (cx, cy), textcoords="offset points", xytext=(10, 5), fontsize=10)
+for i in range(n_cities):
+    for j in range(i+1, n_cities):
+        ax1.plot([coords[i][0], coords[j][0]], [coords[i][1], coords[j][1]], 'b-', alpha=0.3)
+        mid_x = (coords[i][0] + coords[j][0]) / 2
+        mid_y = (coords[i][1] + coords[j][1]) / 2
+        ax1.annotate(f'{distance_matrix[i][j]:.1f}', (mid_x, mid_y), fontsize=7, color='gray')
+ax1.set_title('All Connections')
+ax1.grid(True)
+
+# Middle — classical solution
+ax2 = axes[1]
+ax2.scatter(coords[:, 0], coords[:, 1], s=200, c='red', zorder=3)
+for i, (cx, cy) in enumerate(coords):
+    ax2.annotate(f'City {i}', (cx, cy), textcoords="offset points", xytext=(10, 5), fontsize=10)
+full_classical = best_route + [best_route[0]]
+for i in range(len(full_classical)-1):
+    a, b = full_classical[i], full_classical[i+1]
+    ax2.plot([coords[a][0], coords[b][0]], [coords[a][1], coords[b][1]], 'g-', linewidth=2.5)
+    ax2.annotate('', xy=coords[b], xytext=coords[a],
+                arrowprops=dict(arrowstyle='->', color='green', lw=2))
+ax2.set_title(f'Classical Brute Force\nDistance: {best_dist:.2f}')
+ax2.grid(True)
+
+# Right — quantum solution
+ax3 = axes[2]
+ax3.scatter(coords[:, 0], coords[:, 1], s=200, c='red', zorder=3)
+for i, (cx, cy) in enumerate(coords):
+    ax3.annotate(f'City {i}', (cx, cy), textcoords="offset points", xytext=(10, 5), fontsize=10)
+full_quantum = quantum_route + [quantum_route[0]]
+for i in range(len(full_quantum)-1):
+    a, b = full_quantum[i], full_quantum[i+1]
+    ax3.plot([coords[a][0], coords[b][0]], [coords[a][1], coords[b][1]], 'b-', linewidth=2.5)
+    ax3.annotate('', xy=coords[b], xytext=coords[a],
+                arrowprops=dict(arrowstyle='->', color='blue', lw=2))
+ax3.set_title(f"Grover's Algorithm\nDistance: {q_dist:.2f}")
+ax3.grid(True)
+
+plt.suptitle("TSP — Classical vs Grover's (4 Cities)", fontsize=14, fontweight='bold')
+plt.tight_layout()
+
+# Measurement histogram
+fig2, ax4 = plt.subplots(figsize=(8, 4))
+valid_states = {k: v for k, v in counts.items() if int(k, 2) < len(all_routes)}
+ax4.bar(
+    [f"|{k}⟩" for k in valid_states.keys()],
+    valid_states.values(),
+    color=['green' if k == target_state else 'gray' for k in valid_states.keys()]
+)
+ax4.set_title("Grover's Measurement Results\n(green = correct answer)")
+ax4.set_ylabel('Count (out of 1000 shots)')
+ax4.grid(True, axis='y')
+plt.tight_layout()
+
+plt.show()
