@@ -4,7 +4,7 @@ from itertools import permutations
 
 # city generator
 np.random.seed(42) # <------------------------- Lock the randomness here
-n_cities = 4
+n_cities = 7
 coords = np.random.randint(0, 100, size=(n_cities, 2))
 
 # distance matrix
@@ -87,11 +87,16 @@ for i in range(len(full_route) - 1):
 ax2.set_title(f'Best Route — Distance: {best_dist:.2f}')
 ax2.grid(True)
 
+"""
 plt.suptitle('TSP — 5 Cities (Brute Force)', fontsize=14, fontweight='bold')
 plt.tight_layout()
 plt.show()
+"""
 
-# ── QUANTUM TSP WITH GROVER'S ALGORITHM (4 CITIES) ───────────────────
+
+# ====================================================================================================================================================================
+# ── QUANTUM TSP WITH GROVER'S ALGORITHM (4 CITIES) ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+# ====================================================================================================================================================================
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -123,34 +128,38 @@ target_state = format(target_idx, '03b')
 print(f"\nTarget state: |{target_state}⟩ — Grover's should find this")
 
 # ── 2. BUILD GROVER'S CIRCUIT ─────────────────────────────────────────
-n_qubits = 3
+n_routes = len(all_routes)
+n_qubits = int(np.ceil(np.log2(n_routes + 1)))  # auto-calculate qubits needed
+
 qr = QuantumRegister(n_qubits, 'q')
 cr = ClassicalRegister(n_qubits, 'c')
 circuit = QuantumCircuit(qr, cr)
 
-# Step 1: Hadamard on all qubits — superposition of all 8 states
+# Step 1: Hadamard on all qubits
 circuit.h(qr)
 circuit.barrier()
 
-# Step 2: Oracle — phase-flip the target state
-# Flip qubits where target bit is 0, apply multi-controlled Z, flip back
+# Step 2: Oracle — dynamic, works for any number of qubits
 for i, bit in enumerate(reversed(target_state)):
     if bit == '0':
         circuit.x(qr[i])
-circuit.h(qr[2])
-circuit.ccx(qr[0], qr[1], qr[2])  # Toffoli gate = controlled-controlled-X
-circuit.h(qr[2])
+
+# Multi-controlled Z on last qubit, controlled by all others
+circuit.h(qr[n_qubits - 1])
+circuit.mcx(list(range(n_qubits - 1)), n_qubits - 1)  # mcx = multi-controlled X
+circuit.h(qr[n_qubits - 1])
+
 for i, bit in enumerate(reversed(target_state)):
     if bit == '0':
         circuit.x(qr[i])
 circuit.barrier()
 
-# Step 3: Diffusion operator
+# Step 3: Diffusion operator — also dynamic
 circuit.h(qr)
 circuit.x(qr)
-circuit.h(qr[2])
-circuit.ccx(qr[0], qr[1], qr[2])
-circuit.h(qr[2])
+circuit.h(qr[n_qubits - 1])
+circuit.mcx(list(range(n_qubits - 1)), n_qubits - 1)
+circuit.h(qr[n_qubits - 1])
 circuit.x(qr)
 circuit.h(qr)
 circuit.barrier()
